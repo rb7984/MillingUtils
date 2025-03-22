@@ -1,0 +1,64 @@
+# Rider
+.idea/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+
+# Output delle build (binari, librerie, ecc.)
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+*.cache
+*.ilk
+*.log
+*.vsix
+*.template
+*.ide
+
+# File di log
+*.log
+
+# File temporanei di Rhino
+*.rhl
+*.3dm
+
+# File di configurazione specifici della macchina
+*.csproj.user
+*.csproj.DotSettings
+
+# File di pacchetti NuGet
+*.nupkg
+*.nuget/
+
+# File di pacchetti NuGet generati automaticamente
+packages/
+project.lock.json
+project.fragment.lock.json
+
+# Cartelle di distribuzione
+Publish/
+.vscode/
+
+# Configurazioni temporanee di test o profiling
+TestResults/
+*.coverage
+*.coveragexml
+
+# Configurazioni di ReSharper
+_ReSharper.Caches/
+
+# File generati da Rhino (modelli 3D)
+*.3dm
+
+# Librerie e dipendenze RhinoCommon e altri SDK
+RhinoCommon.dll
+RhinoCommon.xml
+Eto.dll
+Eto.xml
