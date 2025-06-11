@@ -41,7 +41,7 @@ namespace MillingUtils
         /// </summary>
         protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager)
         {
-            pManager.AddCurveParameter("Out", "O", "Output Cutouts", GH_ParamAccess.list);
+            //pManager.AddCurveParameter("Out", "O", "Output Cutouts", GH_ParamAccess.list);
             pManager.AddCurveParameter("OutSegments", "OS", "Output test Cutouts", GH_ParamAccess.list);
         }
 
@@ -70,32 +70,30 @@ namespace MillingUtils
             DA.GetData(3, ref offset);
 
             // Set output List
-            List<Curve> outputs = new List<Curve>();
             List<Curve> outputSegments = new List<Curve>();
 
-            foreach (Curve c in cutouts)
+            foreach (Curve cutout in cutouts)
             {
-                double overlapLength = GetOverlapLength(c, part, 0.01, 0.01);
+                double overlapLength = GetOverlapLength(cutout, part, 0.01, 0.01);
                 if (overlapLength > 0)
                 {
-                    var offsetCurves = c.Offset(plane, offset, 1e-5, CurveOffsetCornerStyle.Round);
-                    var segment = GetOverlapSegment(c, part, 0.01, 0.01);
+                    var segment = GetOverlapSegment(part, cutout, 0.01, 0.01);
+                    //var offsetCurves = cutout.Offset(plane, offset, 1e-5, CurveOffsetCornerStyle.Round);
 
-                    if (offsetCurves != null)
-                        foreach (Curve oc in offsetCurves)
-                            outputs.Add(oc);
-                    else
-                        outputs.Add(c);
+                    //if (offsetCurves != null)
+                    //    foreach (Curve oc in offsetCurves)
+                    //        outputs.Add(oc);
+                    //else
+                    //    outputs.Add(cutout);
 
                     if (segment != null)
                     {
-                        outputSegments.Add(segment.ToNurbsCurve());
+                        outputSegments.AddRange(segment);
                     }
                 }
             }
 
-            DA.SetDataList(0, outputs);
-            DA.SetDataList(1, outputSegments);
+            DA.SetDataList(0, outputSegments);
         }
 
         /// <summary>
@@ -133,10 +131,11 @@ namespace MillingUtils
             return totalOverlapLength;
         }
 
-        public Line GetOverlapSegment(Curve curveA, Curve curveB, double tolerance, double overlapTolerance)
+        public List<Curve> GetOverlapSegment(Curve part, Curve cutout, double tolerance, double overlapTolerance)
         {
-            CurveIntersections intersections = Intersection.CurveCurve(curveA, curveB, tolerance, overlapTolerance);
-            Line overlapSegment = new Line();
+            //TODO Get all point of a segment, or get the segment itself.
+            CurveIntersections intersections = Intersection.CurveCurve(part, cutout, tolerance, overlapTolerance);
+            List<Curve> overlappedCurves = new List<Curve>();
 
             if (intersections != null)
             {
@@ -144,14 +143,16 @@ namespace MillingUtils
                 {
                     if (eventX.IsOverlap)
                     {
-                        double length = curveA.GetLength(new Interval(eventX.OverlapA[0], eventX.OverlapA[1]));
+                        Curve partToTrim = part.DuplicateCurve();
 
-                        overlapSegment = new Line(curveA.PointAt(eventX.OverlapA[0]), curveA.PointAt(eventX.OverlapA[1]));
+                        partToTrim.Trim(eventX.OverlapA[0], eventX.OverlapA[1]);
+
+                        overlappedCurves.Add(partToTrim);
                     }
                 }
             }
 
-            return overlapSegment;
+            return overlappedCurves;
         }
     }
 }
