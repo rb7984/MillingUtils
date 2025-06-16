@@ -42,8 +42,8 @@ namespace MillingUtils
         /// </summary>
         protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager)
         {
-            //pManager.AddCurveParameter("Out", "O", "Output Cutouts", GH_ParamAccess.list);
-            pManager.AddCurveParameter("OutSegments", "OS", "Output test Cutouts", GH_ParamAccess.list);
+            pManager.AddCurveParameter("OutCutouts", "OC", "Output test Cutouts", GH_ParamAccess.list);
+            pManager.AddCurveParameter("test", "t", "t", GH_ParamAccess.list);
         }
 
         /// <summary>
@@ -53,7 +53,13 @@ namespace MillingUtils
         /// to store data in output parameters.</param>
         protected override void SolveInstance(IGH_DataAccess DA)
         {
-            //TODO check orientation of all curves
+            // REQUIREMENTS:
+            // 1. All Curves all Closed?
+            // 2. Everything is drawn on XY plane -> Check if not
+            // 3. Only one overlap Segment per cutout
+
+            //TODO check orientation of all curves, force it to be equal
+            //TODO Check the Plane
 
             Curve part = null;
 
@@ -71,30 +77,27 @@ namespace MillingUtils
             DA.GetData(3, ref offset);
 
             // Set output List
-            List<Curve> outputSegments = new List<Curve>();
+            List<Curve> outputCutouts = new List<Curve>();
+            List<Curve> tests = new List<Curve>();
 
             foreach (Curve cutout in cutouts)
             {
                 double overlapLength = GetOverlapLength(cutout, part, 0.01, 0.01);
                 if (overlapLength > 0)
                 {
-                    var segment = GetOverlapSegment(part, cutout);
-                    //var offsetCurves = cutout.Offset(plane, offset, 1e-5, CurveOffsetCornerStyle.Round);
-
-                    //if (offsetCurves != null)
-                    //    foreach (Curve oc in offsetCurves)
-                    //        outputs.Add(oc);
-                    //else
-                    //    outputs.Add(cutout);
-
-                    if (segment != null)
+                    Curve test;
+                    Curve finalCutout = GetFinalCutout(part, cutout, plane, offset, out test);
+                    
+                    if (finalCutout != null)
                     {
-                        outputSegments.AddRange(segment);
+                        outputCutouts.Add(finalCutout);
+                        tests.Add(test);
                     }
                 }
             }
 
-            DA.SetDataList(0, outputSegments);
+            DA.SetDataList(0, outputCutouts);
+            DA.SetDataList(1, tests);
         }
 
         /// <summary>
@@ -111,6 +114,52 @@ namespace MillingUtils
         /// that use the old ID will partially fail during loading.
         /// </summary>
         public override Guid ComponentGuid => new Guid("E9C9783F-3F14-484C-93FF-0ED78300EB28");
+
+        public Curve GetFinalCutout(Curve part, Curve cutout, Plane plane, double offset, out Curve test)
+        {
+            Curve joinedCurve = null;
+            Curve t = null;
+
+            double tolerance = .01, overlapTolerance = .01;
+
+            CurveIntersections intersections = Intersection.CurveCurve(part, cutout, tolerance, overlapTolerance);
+
+            if (intersections != null)
+            {
+                foreach (IntersectionEvent eventX in intersections)
+                {
+                    if (eventX.IsOverlap)
+                    {
+                        //Curve partToTrim = part.DuplicateCurve();
+                        Curve cutoutToTrim = cutout.DuplicateCurve();
+
+                        // TODO START here the domain {eventX.OverlapB[0], eventX.OverlapB[1]} is not the full overlap.
+                        // In previous version it was, now if the cutout is overlapping for more than one segment
+                        // not all overlapped segments are recognised
+                        Curve trimmedCurveToOffset = cutoutToTrim.Trim(eventX.OverlapB[0], eventX.OverlapB[1]);
+                        // DEBUG
+                        t = trimmedCurveToOffset;
+                        Curve trimmedCurveToJoin = cutoutToTrim.Trim(eventX.OverlapB[1], eventX.OverlapB[0]);
+
+                        Curve offsetCurve = null;
+                        Curve[] offsetCurves = trimmedCurveToOffset.Offset(plane, offset, tolerance, CurveOffsetCornerStyle.Sharp);
+                        offsetCurve = offsetCurves.Length == 1 ? offsetCurves[0] : Curve.JoinCurves(offsetCurves)[0];
+
+                        //TODO Check for multiple results
+                        joinedCurve = Curve.JoinCurves(new List<Curve>
+                        {
+                            trimmedCurveToJoin,
+                            new Line(trimmedCurveToJoin.PointAtStart, offsetCurve.PointAtEnd).ToNurbsCurve(),
+                            offsetCurve,
+                            new Line(trimmedCurveToJoin.PointAtEnd, offsetCurve.PointAtStart).ToNurbsCurve(),
+                        })[0];
+                    }
+                }
+            }
+
+            test = t;
+            return joinedCurve;
+        }
 
         public static double GetOverlapLength(Curve curveA, Curve curveB, double tolerance, double overlapTolerance)
         {
@@ -130,32 +179,6 @@ namespace MillingUtils
             }
 
             return totalOverlapLength;
-        }
-
-        public List<Curve> GetOverlapSegment(Curve part, Curve cutout)
-        {
-            List<Curve> overlappedCurves = new List<Curve>();
-
-            double tolerance = .01, overlapTolerance = .01;
-
-            CurveIntersections intersections = Intersection.CurveCurve(part, cutout, tolerance, overlapTolerance);
-
-            if (intersections != null)
-            {
-                foreach (IntersectionEvent eventX in intersections)
-                {
-                    if (eventX.IsOverlap)
-                    {
-                        Curve partToTrim = part.DuplicateCurve();
-
-                        Curve trimmedCurve = partToTrim.Trim(eventX.OverlapA[0], eventX.OverlapA[1]);
-
-                        overlappedCurves.Add(trimmedCurve);
-                    }
-                }
-            }
-
-            return overlappedCurves;
         }
     }
 }
