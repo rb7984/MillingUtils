@@ -2,6 +2,7 @@ using Grasshopper;
 using Grasshopper.Kernel;
 using Rhino.Geometry;
 using System;
+using System.Diagnostics;
 using System.Collections.Generic;
 using Rhino.Geometry.Intersect;
 
@@ -77,7 +78,7 @@ namespace MillingUtils
                 double overlapLength = GetOverlapLength(cutout, part, 0.01, 0.01);
                 if (overlapLength > 0)
                 {
-                    var segment = GetOverlapSegment(part, cutout, 0.01, 0.01);
+                    var segment = GetOverlapSegment(part, cutout);
                     //var offsetCurves = cutout.Offset(plane, offset, 1e-5, CurveOffsetCornerStyle.Round);
 
                     //if (offsetCurves != null)
@@ -131,11 +132,13 @@ namespace MillingUtils
             return totalOverlapLength;
         }
 
-        public List<Curve> GetOverlapSegment(Curve part, Curve cutout, double tolerance, double overlapTolerance)
+        public List<Curve> GetOverlapSegment(Curve part, Curve cutout)
         {
-            //TODO Get all point of a segment, or get the segment itself.
-            CurveIntersections intersections = Intersection.CurveCurve(part, cutout, tolerance, overlapTolerance);
             List<Curve> overlappedCurves = new List<Curve>();
+
+            double tolerance = .01, overlapTolerance = .01;
+
+            CurveIntersections intersections = Intersection.CurveCurve(part, cutout, tolerance, overlapTolerance);
 
             if (intersections != null)
             {
@@ -145,9 +148,9 @@ namespace MillingUtils
                     {
                         Curve partToTrim = part.DuplicateCurve();
 
-                        partToTrim.Trim(eventX.OverlapA[0], eventX.OverlapA[1]);
+                        Curve trimmedCurve = partToTrim.Trim(eventX.OverlapA[0], eventX.OverlapA[1]);
 
-                        overlappedCurves.Add(partToTrim);
+                        overlappedCurves.Add(trimmedCurve);
                     }
                 }
             }
