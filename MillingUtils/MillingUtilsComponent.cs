@@ -144,31 +144,35 @@ namespace MillingUtils
             if (intersections != null)
             {
                 List<Curve> curvesToJoin = new List<Curve>();
+                List<double> parameters = new List<double>();
 
                 foreach (IntersectionEvent eventX in intersections)
                     if (eventX.IsOverlap)
+                    {
                         curvesToJoin.Add(cutout.Trim(eventX.OverlapB[0], eventX.OverlapB[1]));
 
+                        parameters.Add(eventX.OverlapB[0]);
+                        parameters.Add(eventX.OverlapB[1]);
+                    }
+
                 Curve trimmedCurveToOffset = Curve.JoinCurves(curvesToJoin)[0];
+
+                Curve trimmedCurveToJoin = GetComplementarSegment(parameters, cutout, trimmedCurveToOffset);
 
                 Curve[] offsetCurves = trimmedCurveToOffset.Offset(plane, offset, tolerance, CurveOffsetCornerStyle.Sharp);
                 Curve offsetCurve = offsetCurves.Length == 1 ? offsetCurves[0] : Curve.JoinCurves(offsetCurves)[0];
 
-                //Curve[] splitCurves = cutout.Split(new double[] { trimmedCurveToOffset.Domain.T0, trimmedCurveToOffset.Domain.T1 });
+                //TODO Check for multiple results
+                //TODO need logic for connecting end and start
+                joinedCurve = Curve.JoinCurves(new List<Curve>
+                        {
+                            trimmedCurveToJoin,
+                            new Line(trimmedCurveToJoin.PointAtStart, offsetCurve.PointAtEnd).ToNurbsCurve(),
+                            offsetCurve,
+                            new Line(trimmedCurveToJoin.PointAtEnd, offsetCurve.PointAtStart).ToNurbsCurve(),
+                        }
+                )[0];
 
-                //Curve trimmedCurveToJoin = splitCurves[0].Domain.IncludesParameter(trimmedCurveToOffset.Domain.T0) ? splitCurves[1] : splitCurves[0];
-
-                ////TODO Check for multiple results
-                //joinedCurve = Curve.JoinCurves(new List<Curve>
-                //        {
-                //            trimmedCurveToJoin,
-                //            new Line(trimmedCurveToJoin.PointAtStart, offsetCurve.PointAtEnd).ToNurbsCurve(),
-                //            offsetCurve,
-                //            new Line(trimmedCurveToJoin.PointAtEnd, offsetCurve.PointAtStart).ToNurbsCurve(),
-                //        }
-                //)[0];
-
-                joinedCurve = offsetCurve;
                 t = trimmedCurveToOffset;
             }
 
@@ -220,6 +224,29 @@ namespace MillingUtils
             }
 
             return State.Valid;
+        }
+
+        public Curve GetComplementarSegment(List<double> parameters, Curve cutout, Curve offsetSegment)
+        {
+            parameters = parameters.Distinct().ToList();
+
+            Point3d offsetStart = offsetSegment.PointAtStart;
+            Point3d offsetEnd = offsetSegment.PointAtEnd;
+
+            List<double> startEndParameters = parameters
+                .Where(p =>
+                    Math.Abs(cutout.PointAt(p).DistanceTo(offsetStart)) < 10e-4 ||
+                    Math.Abs(cutout.PointAt(p).DistanceTo(offsetEnd)) < 10e-4)
+                .ToList();
+
+            List<Curve> splitCurves = cutout.Split(startEndParameters).ToList();
+
+            splitCurves.RemoveAll(curve =>
+                    curve.PointAtLength(curve.GetLength() * 0.5)
+                            .DistanceTo(offsetSegment.PointAtLength(offsetSegment.GetLength() * 0.5)) < 10e-4);
+
+            // TODO need robust check here
+            return splitCurves[0];
         }
 
         public enum State
