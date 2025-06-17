@@ -3,6 +3,7 @@ using Grasshopper.Kernel;
 using Rhino.Geometry;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Collections.Generic;
 using Rhino.Geometry.Intersect;
 
@@ -35,6 +36,8 @@ namespace MillingUtils
             pManager[2].Optional = true;
             pManager.AddNumberParameter("Offset", "O", "The value to offset the cutouts to the exterior", GH_ParamAccess.item);
             pManager[3].Optional = true;
+            pManager.AddBooleanParameter("IsHole", "H", "Boolean value for the part to be a Hole or not", GH_ParamAccess.item);
+            pManager[4].Optional = true;
         }
 
         /// <summary>
@@ -53,13 +56,9 @@ namespace MillingUtils
         /// to store data in output parameters.</param>
         protected override void SolveInstance(IGH_DataAccess DA)
         {
-            // REQUIREMENTS:
-            // 1. All Curves all Closed?
-            // 2. Everything is drawn on XY plane -> Check if not
-            // 3. Only one overlap Segment per cutout
-
-            //TODO check orientation of all curves, force it to be equal
-            //TODO Check the Plane
+            // REQUIREMENTS:           
+            // 1. Everything is drawn on XY plane -> Check if not
+            // 2. Only one overlap Segment per cutout
 
             Curve part = null;
 
@@ -76,6 +75,23 @@ namespace MillingUtils
             double offset = 10;
             DA.GetData(3, ref offset);
 
+            bool isHole = false;
+            DA.GetData(4, ref isHole);
+
+            // Checks on Planarity and Direction
+            State state = PreliminaryCheck(ref part, ref cutouts, isHole);
+
+            if (state == State.PartNonPlanar)
+            {
+                this.AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "The curve input is not planar");
+                return;
+            }
+            if (state == State.CutoutsNonPlanar)
+            {
+                this.AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "At least one of the cutouts input is not planar");
+                return;
+            }
+
             // Set output List
             List<Curve> outputCutouts = new List<Curve>();
             List<Curve> tests = new List<Curve>();
@@ -87,7 +103,7 @@ namespace MillingUtils
                 {
                     Curve test;
                     Curve finalCutout = GetFinalCutout(part, cutout, plane, offset, out test);
-                    
+
                     if (finalCutout != null)
                     {
                         outputCutouts.Add(finalCutout);
@@ -126,16 +142,19 @@ namespace MillingUtils
 
             if (intersections != null)
             {
+                // TODO START here the domain {eventX.OverlapB[0], eventX.OverlapB[1]} is not the full overlap.
+                // In previous version it was, now if the cutout is overlapping for more than one segment
+                // not all overlapped segments are recognised
+                Debug.WriteLine("Number of Intersection Events: " + intersections.Count);
+
+                // There is one intersection event for each segment that is overlapped.
+
                 foreach (IntersectionEvent eventX in intersections)
                 {
                     if (eventX.IsOverlap)
                     {
-                        //Curve partToTrim = part.DuplicateCurve();
                         Curve cutoutToTrim = cutout.DuplicateCurve();
 
-                        // TODO START here the domain {eventX.OverlapB[0], eventX.OverlapB[1]} is not the full overlap.
-                        // In previous version it was, now if the cutout is overlapping for more than one segment
-                        // not all overlapped segments are recognised
                         Curve trimmedCurveToOffset = cutoutToTrim.Trim(eventX.OverlapB[0], eventX.OverlapB[1]);
                         // DEBUG
                         t = trimmedCurveToOffset;
@@ -179,6 +198,39 @@ namespace MillingUtils
             }
 
             return totalOverlapLength;
+        }
+
+        public State PreliminaryCheck(ref Curve part, ref List<Curve> cutouts, bool isHole)
+        {
+            // Check for 
+            if (!part.IsPlanar())
+                return State.PartNonPlanar;
+            if (cutouts.Any(x => !x.IsPlanar()))
+                return State.CutoutsNonPlanar;
+
+            Plane plane;
+            part.TryGetPlane(out plane);
+
+            if (plane.Normal.Z > 0 & isHole)
+                part.Reverse();
+
+            foreach(Curve cutout in cutouts)
+            {
+                Plane plane1;
+                part.TryGetPlane(out plane1);
+
+                if (plane1.Normal.Z > 0 & isHole)
+                    cutout.Reverse();
+            }
+
+            return State.Valid;
+        }
+
+        public enum State
+        {
+            PartNonPlanar,
+            CutoutsNonPlanar,
+            Valid
         }
     }
 }
