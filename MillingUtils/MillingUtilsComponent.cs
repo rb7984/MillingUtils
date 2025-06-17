@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Collections.Generic;
 using Rhino.Geometry.Intersect;
+using static Rhino.Render.ChangeQueue.Light;
 
 namespace MillingUtils
 {
@@ -142,38 +143,33 @@ namespace MillingUtils
 
             if (intersections != null)
             {
-                // TODO START here the domain {eventX.OverlapB[0], eventX.OverlapB[1]} is not the full overlap.
-                // In previous version it was, now if the cutout is overlapping for more than one segment
-                // not all overlapped segments are recognised
-                Debug.WriteLine("Number of Intersection Events: " + intersections.Count);
-
-                // There is one intersection event for each segment that is overlapped.
+                List<Curve> curvesToJoin = new List<Curve>();
 
                 foreach (IntersectionEvent eventX in intersections)
-                {
                     if (eventX.IsOverlap)
-                    {
-                        Curve cutoutToTrim = cutout.DuplicateCurve();
+                        curvesToJoin.Add(cutout.Trim(eventX.OverlapB[0], eventX.OverlapB[1]));
 
-                        Curve trimmedCurveToOffset = cutoutToTrim.Trim(eventX.OverlapB[0], eventX.OverlapB[1]);
-                        // DEBUG
-                        t = trimmedCurveToOffset;
-                        Curve trimmedCurveToJoin = cutoutToTrim.Trim(eventX.OverlapB[1], eventX.OverlapB[0]);
+                Curve trimmedCurveToOffset = Curve.JoinCurves(curvesToJoin)[0];
 
-                        Curve offsetCurve = null;
-                        Curve[] offsetCurves = trimmedCurveToOffset.Offset(plane, offset, tolerance, CurveOffsetCornerStyle.Sharp);
-                        offsetCurve = offsetCurves.Length == 1 ? offsetCurves[0] : Curve.JoinCurves(offsetCurves)[0];
+                Curve[] offsetCurves = trimmedCurveToOffset.Offset(plane, offset, tolerance, CurveOffsetCornerStyle.Sharp);
+                Curve offsetCurve = offsetCurves.Length == 1 ? offsetCurves[0] : Curve.JoinCurves(offsetCurves)[0];
 
-                        //TODO Check for multiple results
-                        joinedCurve = Curve.JoinCurves(new List<Curve>
-                        {
-                            trimmedCurveToJoin,
-                            new Line(trimmedCurveToJoin.PointAtStart, offsetCurve.PointAtEnd).ToNurbsCurve(),
-                            offsetCurve,
-                            new Line(trimmedCurveToJoin.PointAtEnd, offsetCurve.PointAtStart).ToNurbsCurve(),
-                        })[0];
-                    }
-                }
+                //Curve[] splitCurves = cutout.Split(new double[] { trimmedCurveToOffset.Domain.T0, trimmedCurveToOffset.Domain.T1 });
+
+                //Curve trimmedCurveToJoin = splitCurves[0].Domain.IncludesParameter(trimmedCurveToOffset.Domain.T0) ? splitCurves[1] : splitCurves[0];
+
+                ////TODO Check for multiple results
+                //joinedCurve = Curve.JoinCurves(new List<Curve>
+                //        {
+                //            trimmedCurveToJoin,
+                //            new Line(trimmedCurveToJoin.PointAtStart, offsetCurve.PointAtEnd).ToNurbsCurve(),
+                //            offsetCurve,
+                //            new Line(trimmedCurveToJoin.PointAtEnd, offsetCurve.PointAtStart).ToNurbsCurve(),
+                //        }
+                //)[0];
+
+                joinedCurve = offsetCurve;
+                t = trimmedCurveToOffset;
             }
 
             test = t;
@@ -214,7 +210,7 @@ namespace MillingUtils
             if (plane.Normal.Z > 0 & isHole)
                 part.Reverse();
 
-            foreach(Curve cutout in cutouts)
+            foreach (Curve cutout in cutouts)
             {
                 Plane plane1;
                 part.TryGetPlane(out plane1);
