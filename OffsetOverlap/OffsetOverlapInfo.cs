@@ -3,11 +3,11 @@ using Grasshopper.Kernel;
 using System;
 using System.Drawing;
 
-namespace MillingUtils
+namespace OffsetOverlap
 {
-    public class MillingUtilsInfo : GH_AssemblyInfo
+    public class OffsetOverlapInfo : GH_AssemblyInfo
     {
-        public override string Name => "MillingUtils";
+        public override string Name => "OffsetOverlap";
 
         //Return a 24x24 pixel bitmap to represent this GHA library.
         public override Bitmap Icon => null;

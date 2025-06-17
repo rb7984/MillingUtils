@@ -6,11 +6,13 @@ using System.Diagnostics;
 using System.Linq;
 using System.Collections.Generic;
 using Rhino.Geometry.Intersect;
-using static Rhino.Render.ChangeQueue.Light;
 
-namespace MillingUtils
+//TODO Check IsHole logic
+//TODO Check the Pane Input Logic
+
+namespace OffsetOverlap
 {
-    public class MillingUtilsComponent : GH_Component
+    public class OffsetOverlapComponent : GH_Component
     {
         /// <summary>
         /// Each implementation of GH_Component must provide a public 
@@ -19,10 +21,10 @@ namespace MillingUtils
         /// Subcategory the panel. If you use non-existing tab or panel names, 
         /// new tabs/panels will automatically be created.
         /// </summary>
-        public MillingUtilsComponent()
-          : base("MillingUtils", "MU",
-            "Offset multiple Pockets for milling purposes",
-            "MillingUtils", "Utils")
+        public OffsetOverlapComponent()
+          : base("OffsetOverlap", "OO",
+            "Offset Curves that are overlapping",
+            "OffsetOverlap", "Utils")
         {
         }
 
@@ -47,7 +49,6 @@ namespace MillingUtils
         protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager)
         {
             pManager.AddCurveParameter("OutCutouts", "OC", "Output test Cutouts", GH_ParamAccess.list);
-            pManager.AddCurveParameter("test", "t", "t", GH_ParamAccess.list);
         }
 
         /// <summary>
@@ -95,26 +96,22 @@ namespace MillingUtils
 
             // Set output List
             List<Curve> outputCutouts = new List<Curve>();
-            List<Curve> tests = new List<Curve>();
 
             foreach (Curve cutout in cutouts)
             {
                 double overlapLength = GetOverlapLength(cutout, part, 0.01, 0.01);
                 if (overlapLength > 0)
                 {
-                    Curve test;
-                    Curve finalCutout = GetFinalCutout(part, cutout, plane, offset, out test);
+                    Curve finalCutout = GetFinalCutout(part, cutout, plane, offset);
 
                     if (finalCutout != null)
                     {
                         outputCutouts.Add(finalCutout);
-                        tests.Add(test);
                     }
                 }
             }
 
             DA.SetDataList(0, outputCutouts);
-            DA.SetDataList(1, tests);
         }
 
         /// <summary>
@@ -123,7 +120,7 @@ namespace MillingUtils
         /// You can add image files to your project resources and access them like this:
         /// return Resources.IconForThisComponent;
         /// </summary>
-        protected override System.Drawing.Bitmap Icon => null;
+        protected override System.Drawing.Bitmap Icon => OffsetOverlap.Properties.Resources.icon;
 
         /// <summary>
         /// Each component must have a unique Guid to identify it. 
@@ -132,10 +129,9 @@ namespace MillingUtils
         /// </summary>
         public override Guid ComponentGuid => new Guid("E9C9783F-3F14-484C-93FF-0ED78300EB28");
 
-        public Curve GetFinalCutout(Curve part, Curve cutout, Plane plane, double offset, out Curve test)
+        public Curve GetFinalCutout(Curve part, Curve cutout, Plane plane, double offset)
         {
             Curve joinedCurve = null;
-            Curve t = null;
 
             double tolerance = .01, overlapTolerance = .01;
 
@@ -172,11 +168,8 @@ namespace MillingUtils
                             new Line(trimmedCurveToJoin.PointAtEnd, offsetCurve.PointAtStart).ToNurbsCurve(),
                         }
                 )[0];
-
-                t = trimmedCurveToOffset;
             }
 
-            test = t;
             return joinedCurve;
         }
 
