@@ -16,6 +16,11 @@ namespace OffsetOverlap
 {
     public class OffsetOverlapComponent : GH_Component
     {
+        // 0 - SingleSegment; 1 - More than one segment
+        int segmentNumber;
+        // 0 - SingleSegment; 1 - More than one segment
+        int overlapNumber;
+
         /// <summary>
         /// Each implementation of GH_Component must provide a public 
         /// constructor without any arguments.
@@ -28,6 +33,8 @@ namespace OffsetOverlap
             "Offset Curves that are overlapping",
             "OffsetOverlap", "Utils")
         {
+            segmentNumber = 0;
+            overlapNumber = 0;
         }
 
         /// <summary>
@@ -52,7 +59,7 @@ namespace OffsetOverlap
         /// </summary>
         protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager)
         {
-            pManager.AddCurveParameter("OutCutouts", "OC", "Output test Cutouts", GH_ParamAccess.list);
+            pManager.AddCurveParameter("Offsets", "O", "Output the offset curves", GH_ParamAccess.list);
         }
 
         /// <summary>
@@ -85,6 +92,7 @@ namespace OffsetOverlap
             DA.GetData(4, ref reverse);
 
             // Checks on Planarity and Direction
+            //TODO Check inverse
             State state = PreliminaryCheck(ref part, ref cutouts, reverse);
 
             if (state == State.PartNonPlanar)
@@ -99,23 +107,23 @@ namespace OffsetOverlap
             }
 
             // Set output List
-            List<Curve> outputCutouts = new List<Curve>();
+            List<Curve> outputOffsets = new List<Curve>();
 
             foreach (Curve cutout in cutouts)
             {
                 double overlapLength = GetOverlapLength(cutout, part, 0.01, 0.01);
                 if (overlapLength > 0)
                 {
-                    Curve finalCutout = GetFinalCutout(part, cutout, plane, offset);
+                    Curve finalOffset = GetFinalCutout(part, cutout, plane, offset);
 
-                    if (finalCutout != null)
+                    if (finalOffset != null)
                     {
-                        outputCutouts.Add(finalCutout);
+                        outputOffsets.Add(finalOffset);
                     }
                 }
             }
 
-            DA.SetDataList(0, outputCutouts);
+            DA.SetDataList(0, outputOffsets);
         }
 
         /// <summary>
@@ -133,13 +141,17 @@ namespace OffsetOverlap
         /// </summary>
         public override Guid ComponentGuid => new Guid("E9C9783F-3F14-484C-93FF-0ED78300EB28");
 
-        public Curve GetFinalCutout(Curve part, Curve cutout, Plane plane, double offset)
+        public Curve GetFinalCutout(Curve part, Curve overlap, Plane plane, double offset)
         {
+            // Check for singleSegment overlap
+            if (overlap.DuplicateSegments().Length == 0)
+                this.segmentNumber = 0;
+            else this.segmentNumber = 1;
+
             Curve joinedCurve = null;
 
-            double tolerance = .01, overlapTolerance = .01;
-
-            CurveIntersections intersections = Intersection.CurveCurve(part, cutout, tolerance, overlapTolerance);
+            // Intersections
+            CurveIntersections intersections = Intersection.CurveCurve(part, overlap, .01, .01);
 
             if (intersections != null)
             {
@@ -149,24 +161,23 @@ namespace OffsetOverlap
                 foreach (IntersectionEvent eventX in intersections)
                     if (eventX.IsOverlap)
                     {
-                        Debug.WriteLine(eventX);
-
-                        Curve trimmed = cutout.Trim(eventX.OverlapB[0], eventX.OverlapB[1]);
+                        Curve trimmed = overlap.Trim(eventX.OverlapB[0], eventX.OverlapB[1]);
 
                         //Check for complete overlap                        
                         if (trimmed != null)
                             curvesToJoin.Add(trimmed);
                         else
-                            curvesToJoin.Add(cutout);
+                            curvesToJoin.Add(overlap);
 
                         parameters.Add(eventX.OverlapB[0]);
                         parameters.Add(eventX.OverlapB[1]);
                     }
+
                 Curve trimmedCurveToOffset = Curve.JoinCurves(curvesToJoin)[0];
 
-                Curve trimmedCurveToJoin = GetComplementarSegment(parameters, cutout, trimmedCurveToOffset);
+                Curve trimmedCurveToJoin = GetComplementarSegment(parameters, overlap, trimmedCurveToOffset);
 
-                Curve[] offsetCurves = trimmedCurveToOffset.Offset(plane, offset, tolerance, CurveOffsetCornerStyle.Sharp);
+                Curve[] offsetCurves = trimmedCurveToOffset.Offset(plane, offset, .01, CurveOffsetCornerStyle.Sharp);
                 if (offsetCurves == null)
                 {
                     this.AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Could not offset the curve");
@@ -176,7 +187,9 @@ namespace OffsetOverlap
                 Curve offsetCurve = offsetCurves.Length == 1 ? offsetCurves[0] : Curve.JoinCurves(offsetCurves)[0];
 
                 //TODO Check for multiple results
-                if (trimmedCurveToJoin != null)
+                if (this.segmentNumber == 0)
+                    joinedCurve = offsetCurve;
+                if (trimmedCurveToJoin != null & this.segmentNumber == 1)
                     joinedCurve = Curve.JoinCurves(new List<Curve>
                         {
                             trimmedCurveToJoin,
@@ -185,7 +198,6 @@ namespace OffsetOverlap
                             new Line(trimmedCurveToJoin.PointAtEnd, offsetCurve.PointAtStart).ToNurbsCurve(),
                         }
                     )[0];
-                else joinedCurve = offsetCurve;
             }
 
             return joinedCurve;
@@ -257,7 +269,6 @@ namespace OffsetOverlap
                             .DistanceTo(segmentToOffset.PointAtLength(segmentToOffset.GetLength() * 0.5)) < 10e-4);
 
             // TODO need robust check here
-            // TODO CRASH index non compreso se i cutout sono delle linee singole
             return splitCurves.Count == 0 ? null : splitCurves[0];
         }
 
