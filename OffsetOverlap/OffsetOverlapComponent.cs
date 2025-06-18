@@ -7,8 +7,10 @@ using System.Linq;
 using System.Collections.Generic;
 using Rhino.Geometry.Intersect;
 
-//TODO Check IsHole logic
-//TODO Check the Pane Input Logic
+//TODO check for single, open or close polyline for the overlaps.
+// if open, logic to treat 2 different lines after offset
+// if single segment, need ot consider partially or complete overlap.
+//TODO logic for overlapping segments that are not continuous
 
 namespace OffsetOverlap
 {
@@ -34,12 +36,14 @@ namespace OffsetOverlap
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
         {
             pManager.AddCurveParameter("Part", "P", "The Part that needs to be cut", GH_ParamAccess.item);
-            pManager.AddCurveParameter("Cutouts", "C", "The cutouts that need to be extended", GH_ParamAccess.list);
-            pManager.AddPlaneParameter("Plane", "P", "The Plane in which the part lay", GH_ParamAccess.item);
+            pManager.AddCurveParameter("Overlap", "Ov", "The overlap that need to be extended", GH_ParamAccess.list);
+            pManager.AddPlaneParameter("Plane", "P", "The Plane in which the Part lay: this will also be the plane for the offset", GH_ParamAccess.item);
             pManager[2].Optional = true;
-            pManager.AddNumberParameter("Offset", "O", "The value to offset the cutouts to the exterior", GH_ParamAccess.item);
+            pManager.AddNumberParameter("Offset", "Of", "The value to offset the cutouts to the exterior", GH_ParamAccess.item);
             pManager[3].Optional = true;
-            pManager.AddBooleanParameter("IsHole", "H", "Boolean value for the part to be a Hole or not", GH_ParamAccess.item);
+            pManager.AddBooleanParameter("Reverse", "R", "Boolean value to reverse the offset direction:\n" +
+                "true - the overlap is offset inside the Part.\n" +
+                "false - the overlap is offset outside the Part.", GH_ParamAccess.item);
             pManager[4].Optional = true;
         }
 
@@ -77,11 +81,11 @@ namespace OffsetOverlap
             double offset = 10;
             DA.GetData(3, ref offset);
 
-            bool isHole = false;
-            DA.GetData(4, ref isHole);
+            bool reverse = false;
+            DA.GetData(4, ref reverse);
 
             // Checks on Planarity and Direction
-            State state = PreliminaryCheck(ref part, ref cutouts, isHole);
+            State state = PreliminaryCheck(ref part, ref cutouts, reverse);
 
             if (state == State.PartNonPlanar)
             {
@@ -145,29 +149,43 @@ namespace OffsetOverlap
                 foreach (IntersectionEvent eventX in intersections)
                     if (eventX.IsOverlap)
                     {
-                        curvesToJoin.Add(cutout.Trim(eventX.OverlapB[0], eventX.OverlapB[1]));
+                        Debug.WriteLine(eventX);
+
+                        Curve trimmed = cutout.Trim(eventX.OverlapB[0], eventX.OverlapB[1]);
+
+                        //Check for complete overlap                        
+                        if (trimmed != null)
+                            curvesToJoin.Add(trimmed);
+                        else
+                            curvesToJoin.Add(cutout);
 
                         parameters.Add(eventX.OverlapB[0]);
                         parameters.Add(eventX.OverlapB[1]);
                     }
-
                 Curve trimmedCurveToOffset = Curve.JoinCurves(curvesToJoin)[0];
 
                 Curve trimmedCurveToJoin = GetComplementarSegment(parameters, cutout, trimmedCurveToOffset);
 
                 Curve[] offsetCurves = trimmedCurveToOffset.Offset(plane, offset, tolerance, CurveOffsetCornerStyle.Sharp);
+                if (offsetCurves == null)
+                {
+                    this.AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Could not offset the curve");
+                    return null;
+                }
+
                 Curve offsetCurve = offsetCurves.Length == 1 ? offsetCurves[0] : Curve.JoinCurves(offsetCurves)[0];
 
                 //TODO Check for multiple results
-                //TODO need logic for connecting end and start
-                joinedCurve = Curve.JoinCurves(new List<Curve>
+                if (trimmedCurveToJoin != null)
+                    joinedCurve = Curve.JoinCurves(new List<Curve>
                         {
                             trimmedCurveToJoin,
                             new Line(trimmedCurveToJoin.PointAtStart, offsetCurve.PointAtEnd).ToNurbsCurve(),
                             offsetCurve,
                             new Line(trimmedCurveToJoin.PointAtEnd, offsetCurve.PointAtStart).ToNurbsCurve(),
                         }
-                )[0];
+                    )[0];
+                else joinedCurve = offsetCurve;
             }
 
             return joinedCurve;
@@ -219,12 +237,12 @@ namespace OffsetOverlap
             return State.Valid;
         }
 
-        public Curve GetComplementarSegment(List<double> parameters, Curve cutout, Curve offsetSegment)
+        public Curve GetComplementarSegment(List<double> parameters, Curve cutout, Curve segmentToOffset)
         {
             parameters = parameters.Distinct().ToList();
 
-            Point3d offsetStart = offsetSegment.PointAtStart;
-            Point3d offsetEnd = offsetSegment.PointAtEnd;
+            Point3d offsetStart = segmentToOffset.PointAtStart;
+            Point3d offsetEnd = segmentToOffset.PointAtEnd;
 
             List<double> startEndParameters = parameters
                 .Where(p =>
@@ -236,10 +254,11 @@ namespace OffsetOverlap
 
             splitCurves.RemoveAll(curve =>
                     curve.PointAtLength(curve.GetLength() * 0.5)
-                            .DistanceTo(offsetSegment.PointAtLength(offsetSegment.GetLength() * 0.5)) < 10e-4);
+                            .DistanceTo(segmentToOffset.PointAtLength(segmentToOffset.GetLength() * 0.5)) < 10e-4);
 
             // TODO need robust check here
-            return splitCurves[0];
+            // TODO CRASH index non compreso se i cutout sono delle linee singole
+            return splitCurves.Count == 0 ? null : splitCurves[0];
         }
 
         public enum State
