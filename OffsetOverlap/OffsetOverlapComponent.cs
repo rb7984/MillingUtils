@@ -17,7 +17,7 @@ namespace OffsetOverlap
     public class OffsetOverlapComponent : GH_Component
     {
         // 0 - SingleSegment; 1 - More than one segment
-        int segmentNumber;
+        int isLine;
         // 0 - SingleSegment; 1 - More than one segment
         int overlapNumber;
 
@@ -33,7 +33,7 @@ namespace OffsetOverlap
             "Offset Curves that are overlapping",
             "OffsetOverlap", "Utils")
         {
-            segmentNumber = 0;
+            isLine = 0;
             overlapNumber = 0;
         }
 
@@ -114,11 +114,11 @@ namespace OffsetOverlap
                 double overlapLength = GetOverlapLength(cutout, part, 0.01, 0.01);
                 if (overlapLength > 0)
                 {
-                    Curve finalOffset = GetFinalCutout(part, cutout, plane, offset);
+                    List<Curve> finalOffset = GetFinalCutout(part, cutout, plane, offset);
 
                     if (finalOffset != null)
                     {
-                        outputOffsets.Add(finalOffset);
+                        outputOffsets.AddRange(finalOffset);
                     }
                 }
             }
@@ -141,12 +141,12 @@ namespace OffsetOverlap
         /// </summary>
         public override Guid ComponentGuid => new Guid("E9C9783F-3F14-484C-93FF-0ED78300EB28");
 
-        public Curve GetFinalCutout(Curve part, Curve overlap, Plane plane, double offset)
+        public List<Curve> GetFinalCutout(Curve part, Curve overlap, Plane plane, double offset)
         {
             // Check for singleSegment overlap
-            if (overlap.DuplicateSegments().Length == 0)
-                this.segmentNumber = 0;
-            else this.segmentNumber = 1;
+            if (overlap.IsLinear())
+                this.isLine = 0;
+            else this.isLine = 1;
 
             Curve joinedCurve = null;
 
@@ -155,7 +155,7 @@ namespace OffsetOverlap
 
             if (intersections != null)
             {
-                List<Curve> curvesToJoin = new List<Curve>();
+                List<Curve> overlappingSegments = new List<Curve>();
                 List<double> parameters = new List<double>();
 
                 foreach (IntersectionEvent eventX in intersections)
@@ -165,45 +165,85 @@ namespace OffsetOverlap
 
                         //Check for complete overlap                        
                         if (trimmed != null)
-                            curvesToJoin.Add(trimmed);
+                            overlappingSegments.Add(trimmed);
                         else
-                            curvesToJoin.Add(overlap);
+                            overlappingSegments.Add(overlap);
 
                         parameters.Add(eventX.OverlapB[0]);
                         parameters.Add(eventX.OverlapB[1]);
                     }
 
-                Curve trimmedCurveToOffset = Curve.JoinCurves(curvesToJoin)[0];
+                List<Curve> overlappingCurves = Curve.JoinCurves(overlappingSegments).ToList();
 
-                Curve trimmedCurveToJoin = GetComplementarSegment(parameters, overlap, trimmedCurveToOffset);
 
-                Curve[] offsetCurves = trimmedCurveToOffset.Offset(plane, offset, .01, CurveOffsetCornerStyle.Sharp);
-                if (offsetCurves == null)
+                // Offsets
+                List<Curve> offsetCurves = GetOffsetCurves(plane, offset, overlappingCurves);
+
+                // Get All complementar Segments
+                List<Curve> complementarCurves = GetComplementarSegment(parameters, overlap, overlappingCurves);
+
+                //TODO Check for multiple results
+                if (this.isLine == 0) joinedCurve = offsetCurves[0];
+
+                if (complementarCurves.Count == 1 & this.isLine == 1)
+                    joinedCurve = Curve.JoinCurves(new List<Curve>
+                        {
+                            complementarCurves[0],
+                            new Line(complementarCurves[0].PointAtStart, offsetCurves[0].PointAtEnd).ToNurbsCurve(),
+                            offsetCurves[0],
+                            new Line(complementarCurves[0].PointAtEnd, offsetCurves[0].PointAtStart).ToNurbsCurve(),
+                        }
+                    )[0];
+                else
+                {
+                    this.AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Could not offset the curve, due to multiple overlap or open polylines");
+                    return null;
+                }
+            }
+
+            return new List<Curve> { joinedCurve };
+        }
+
+        private List<Curve> GetOffsetCurves(Plane plane, double offset, List<Curve> overlappingCurves)
+        {
+            List<Curve> offsetCurves = new List<Curve>();
+            foreach (Curve trimmedCurveToOffset in overlappingCurves)
+            {
+                Curve[] tmpOffsetCurves = trimmedCurveToOffset.Offset(plane, offset, .01, CurveOffsetCornerStyle.Sharp);
+                if (tmpOffsetCurves == null)
                 {
                     this.AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Could not offset the curve");
                     return null;
                 }
-
-                Curve offsetCurve = offsetCurves.Length == 1 ? offsetCurves[0] : Curve.JoinCurves(offsetCurves)[0];
-
-                //TODO Check for multiple results
-                if (this.segmentNumber == 0)
-                    joinedCurve = offsetCurve;
-                if (trimmedCurveToJoin != null & this.segmentNumber == 1)
-                    joinedCurve = Curve.JoinCurves(new List<Curve>
-                        {
-                            trimmedCurveToJoin,
-                            new Line(trimmedCurveToJoin.PointAtStart, offsetCurve.PointAtEnd).ToNurbsCurve(),
-                            offsetCurve,
-                            new Line(trimmedCurveToJoin.PointAtEnd, offsetCurve.PointAtStart).ToNurbsCurve(),
-                        }
-                    )[0];
+                else
+                    offsetCurves.AddRange(tmpOffsetCurves);
             }
 
-            return joinedCurve;
+            offsetCurves = Curve.JoinCurves(offsetCurves).ToList();
+
+            return offsetCurves;
         }
 
-        public static double GetOverlapLength(Curve curveA, Curve curveB, double tolerance, double overlapTolerance)
+        private List<Curve> GetComplementarSegment(List<double> parameters, Curve cutout, List<Curve> segmentsToOffset)
+        {
+            parameters = parameters.Distinct().ToList();
+
+            List<Point3d> offsetStart = segmentsToOffset.Select(segmentToOffset => segmentToOffset.PointAtStart).ToList();
+            List<Point3d> offsetEnd = segmentsToOffset.Select(segmentToOffset => segmentToOffset.PointAtEnd).ToList();
+
+            List<double> startParameters = parameters.Where(p => offsetStart.Any(start => Math.Abs(cutout.PointAt(p).DistanceTo(start)) < 10e-4)).ToList();
+            List<double> endParameters = parameters.Where(p => offsetEnd.Any(end => Math.Abs(cutout.PointAt(p).DistanceTo(end)) < 10e-4)).ToList();
+
+            List<Curve> splitCurves = cutout.Split(startParameters.Concat(endParameters).ToList()).ToList();
+
+            splitCurves.RemoveAll(curve => segmentsToOffset.Any(segmentToOffset =>
+                    curve.PointAtLength(curve.GetLength() * 0.5)
+                            .DistanceTo(segmentToOffset.PointAtLength(segmentToOffset.GetLength() * 0.5)) < 10e-4));
+
+            return splitCurves;
+        }
+
+        private static double GetOverlapLength(Curve curveA, Curve curveB, double tolerance, double overlapTolerance)
         {
             CurveIntersections intersections = Intersection.CurveCurve(curveA, curveB, tolerance, overlapTolerance);
             double totalOverlapLength = 0;
@@ -223,7 +263,7 @@ namespace OffsetOverlap
             return totalOverlapLength;
         }
 
-        public State PreliminaryCheck(ref Curve part, ref List<Curve> cutouts, bool isHole)
+        private State PreliminaryCheck(ref Curve part, ref List<Curve> cutouts, bool isHole)
         {
             // Check for 
             if (!part.IsPlanar())
@@ -249,30 +289,7 @@ namespace OffsetOverlap
             return State.Valid;
         }
 
-        public Curve GetComplementarSegment(List<double> parameters, Curve cutout, Curve segmentToOffset)
-        {
-            parameters = parameters.Distinct().ToList();
-
-            Point3d offsetStart = segmentToOffset.PointAtStart;
-            Point3d offsetEnd = segmentToOffset.PointAtEnd;
-
-            List<double> startEndParameters = parameters
-                .Where(p =>
-                    Math.Abs(cutout.PointAt(p).DistanceTo(offsetStart)) < 10e-4 ||
-                    Math.Abs(cutout.PointAt(p).DistanceTo(offsetEnd)) < 10e-4)
-                .ToList();
-
-            List<Curve> splitCurves = cutout.Split(startEndParameters).ToList();
-
-            splitCurves.RemoveAll(curve =>
-                    curve.PointAtLength(curve.GetLength() * 0.5)
-                            .DistanceTo(segmentToOffset.PointAtLength(segmentToOffset.GetLength() * 0.5)) < 10e-4);
-
-            // TODO need robust check here
-            return splitCurves.Count == 0 ? null : splitCurves[0];
-        }
-
-        public enum State
+        private enum State
         {
             PartNonPlanar,
             CutoutsNonPlanar,
