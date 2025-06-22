@@ -24,7 +24,7 @@ namespace OffsetOverlap
         public OffsetOverlapComponent()
           : base("OffsetOverlap", "OO",
             "Offset Curves that are overlapping",
-            "OffsetOverlap", "Utils")
+            "Curve", "Util")
         {
             isLine = 0;
         }
@@ -34,16 +34,12 @@ namespace OffsetOverlap
         /// </summary>
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
         {
-            pManager.AddCurveParameter("Part", "P", "The Part that needs to be cut", GH_ParamAccess.item);
-            pManager.AddCurveParameter("Overlap", "Ov", "The overlap that need to be extended", GH_ParamAccess.list);
-            pManager.AddPlaneParameter("Plane", "P", "The Plane in which the Part lay: this will also be the plane for the offset", GH_ParamAccess.item);
+            pManager.AddCurveParameter("Part", "P", "The Part to test the overlap on.", GH_ParamAccess.item);
+            pManager.AddCurveParameter("Overlap", "Ov", "The overlap candidates that will be offset.", GH_ParamAccess.list);
+            pManager.AddPlaneParameter("Plane", "P", "The Plane in which the Part lay: this will also be the plane for the offset.", GH_ParamAccess.item);
             pManager[2].Optional = true;
-            pManager.AddNumberParameter("Offset", "Of", "The value to offset the cutouts to the exterior", GH_ParamAccess.item);
+            pManager.AddNumberParameter("Offset", "Of", "The value to offset the cutouts to the exterior - default value is 10.", GH_ParamAccess.item);
             pManager[3].Optional = true;
-            pManager.AddBooleanParameter("Reverse", "R", "Boolean value to reverse the offset direction:\n" +
-                "true - the overlap is offset inside the Part.\n" +
-                "false - the overlap is offset outside the Part.", GH_ParamAccess.item);
-            pManager[4].Optional = true;
         }
 
         /// <summary>
@@ -51,7 +47,7 @@ namespace OffsetOverlap
         /// </summary>
         protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager)
         {
-            pManager.AddCurveParameter("Offsets", "O", "Output the offset curves", GH_ParamAccess.list);
+            pManager.AddCurveParameter("Offsets", "O", "The offset curves.", GH_ParamAccess.list);
         }
 
         /// <summary>
@@ -61,10 +57,6 @@ namespace OffsetOverlap
         /// to store data in output parameters.</param>
         protected override void SolveInstance(IGH_DataAccess DA)
         {
-            // REQUIREMENTS:           
-            // 1. Everything is drawn on XY plane -> Check if not
-            // 2. Only one overlap Segment per cutout
-
             Curve part = null;
 
             if (!DA.GetData(0, ref part)) { return; }
@@ -79,23 +71,6 @@ namespace OffsetOverlap
 
             double offset = 10;
             DA.GetData(3, ref offset);
-
-            bool reverse = false;
-            DA.GetData(4, ref reverse);
-
-            // Checks on Planarity and Direction
-            State state = PreliminaryCheck(ref part, ref cutouts, reverse);
-
-            if (state == State.PartNonPlanar)
-            {
-                this.AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "The curve input is not planar");
-                return;
-            }
-            if (state == State.CutoutsNonPlanar)
-            {
-                this.AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "At least one of the cutouts input is not planar");
-                return;
-            }
 
             // Set output List
             List<Curve> outputOffsets = new List<Curve>();
@@ -171,6 +146,11 @@ namespace OffsetOverlap
 
                 // Offsets
                 List<Curve> offsetCurves = GetOffsetCurves(plane, offset, overlappingCurves);
+                if (offsetCurves == null)
+                {
+                    this.AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Could not offset the curve");
+                    return null;
+                }
 
                 // Get All complementar Segments
                 List<Curve> complementarCurves = GetComplementarSegment(parameters, overlapCandidate, overlappingCurves);
@@ -182,7 +162,6 @@ namespace OffsetOverlap
                     "ComplementarCurves: " + complementarCurves.Count
                     );
 
-                //TODO Crash con offset 0
                 if (this.isLine == 0) joinedCurve = offsetCurves[0];
                 else
                 {
@@ -272,40 +251,6 @@ namespace OffsetOverlap
             }
 
             return totalOverlapLength;
-        }
-
-        private State PreliminaryCheck(ref Curve part, ref List<Curve> cutouts, bool reverse)
-        {
-            // Check for 
-            if (!part.IsPlanar())
-                return State.PartNonPlanar;
-            if (cutouts.Any(x => !x.IsPlanar()))
-                return State.CutoutsNonPlanar;
-
-            // TODO Check perchè reverse non sta effettivamente controllando.
-            Plane plane;
-            part.TryGetPlane(out plane);
-
-            if (plane.Normal.Z > 0 & reverse)
-                part.Reverse();
-
-            foreach (Curve cutout in cutouts)
-            {
-                Plane plane1;
-                part.TryGetPlane(out plane1);
-
-                if (plane1.Normal.Z > 0 & reverse)
-                    cutout.Reverse();
-            }
-
-            return State.Valid;
-        }
-
-        private enum State
-        {
-            PartNonPlanar,
-            CutoutsNonPlanar,
-            Valid
         }
     }
 }

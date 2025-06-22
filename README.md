@@ -1,2 +1,3 @@
-# MillingUtils
-A GH Plugin to help with milling problems inside Rhino
+# OffsetOverlap
+
+GH Plugin to offset Curves when found overlapping with a test Curve.
